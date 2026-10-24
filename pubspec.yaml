@@ -1,0 +1,28 @@
+name: ipod_classic
+description: "iPod Classic 7 style media player - music (background/lock screen), video and photos. For iOS and Android."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  # Phat nhac + chay nen + man hinh khoa / Dynamic Island / thong bao Android
+  just_audio: ^0.9.42
+  just_audio_background: ^0.0.1-beta.14
+  audio_service: ^0.18.15
+  # Chon file nhac / video / anh tu may
+  file_picker: ^13.1.0
+  # Phat video
+  video_player: ^2.9.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
