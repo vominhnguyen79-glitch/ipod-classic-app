@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:audio_service/audio_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:video_player/video_player.dart';
@@ -334,53 +335,47 @@ class _IPodHomePageState extends State<IPodHomePage> {
     }
   }
 
-  // ---------------- Giao dien ----------------
+  // ---------------- Giao dien (full man hinh) ----------------
   @override
   Widget build(BuildContext context) {
+    final screenW = MediaQuery.of(context).size.width;
+    final wheelSize = screenW * 0.70;
     return Scaffold(
-      backgroundColor: const Color(0xFF2B2B2E),
+      backgroundColor: const Color(0xFFF7F7F7),
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            child: Container(
-              width: 350,
-              padding: const EdgeInsets.fromLTRB(22, 26, 22, 26),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFF7F7F7), Color(0xFFD9D9DE)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(38),
-                boxShadow: const [
-                  BoxShadow(color: Colors.black54, blurRadius: 30, offset: Offset(0, 14)),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _buildScreen(),
-                  const SizedBox(height: 26),
-                  ClickWheel(
-                    isPlaying: _screen == AppScreen.videoPlayer
-                        ? (_video?.value.isPlaying ?? false)
-                        : _player.playing,
-                    onRotate: _onRotate,
-                    onCenter: () => _onCenter(),
-                    onMenu: _onMenuButton,
-                    onNext: () => _onNext(),
-                    onPrevious: () => _onPrevious(),
-                    onPlayPause: () => _onPlayPause(),
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'Xoay vong tron de chon - cham giua de OK - MENU de quay lai',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 11, color: Colors.black54),
-                  ),
-                ],
-              ),
+        child: Container(
+          width: double.infinity,
+          padding: EdgeInsets.fromLTRB(screenW * 0.06, 18, screenW * 0.06, 14),
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFFF7F7F7), Color(0xFFD9D9DE)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
+          ),
+          child: Column(
+            children: [
+              Expanded(child: _buildScreen()),
+              const SizedBox(height: 22),
+              ClickWheel(
+                size: wheelSize,
+                isPlaying: _screen == AppScreen.videoPlayer
+                    ? (_video?.value.isPlaying ?? false)
+                    : _player.playing,
+                onRotate: _onRotate,
+                onCenter: () => _onCenter(),
+                onMenu: _onMenuButton,
+                onNext: () => _onNext(),
+                onPrevious: () => _onPrevious(),
+                onPlayPause: () => _onPlayPause(),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Xoay vong tron de chon - cham giua de OK - MENU de quay lai',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 11, color: Colors.black54),
+              ),
+            ],
           ),
         ),
       ),
@@ -389,7 +384,6 @@ class _IPodHomePageState extends State<IPodHomePage> {
 
   Widget _buildScreen() {
     return Container(
-      height: 300,
       decoration: BoxDecoration(
         color: Colors.black,
         borderRadius: BorderRadius.circular(14),
@@ -635,6 +629,7 @@ class _IPodHomePageState extends State<IPodHomePage> {
 
 // ---------------- Click Wheel (num xoay iPod Classic) ----------------
 class ClickWheel extends StatefulWidget {
+  final double size; // duong kinh num xoay, tinh theo chieu rong man hinh
   final bool isPlaying;
   final void Function(int direction) onRotate;
   final VoidCallback onCenter;
@@ -645,6 +640,7 @@ class ClickWheel extends StatefulWidget {
 
   const ClickWheel({
     super.key,
+    required this.size,
     required this.isPlaying,
     required this.onRotate,
     required this.onCenter,
@@ -678,6 +674,8 @@ class _ClickWheelState extends State<ClickWheel> {
       _accumulated += delta;
       const threshold = 0.35; // ~20 do thi nhay 1 muc
       if (_accumulated.abs() >= threshold) {
+        // Haptic "tach" moi khi xoay qua 1 nac - cam giac bam cua num xoay that.
+        HapticFeedback.selectionClick();
         widget.onRotate(_accumulated > 0 ? 1 : -1);
         _accumulated = 0;
       }
@@ -686,10 +684,12 @@ class _ClickWheelState extends State<ClickWheel> {
   }
 
   void _handleTap(TapUpDetails d, Size s) {
+    // Haptic "cuc" khi bam nut tren num xoay (MENU / Next / Prev / Play / giua).
+    HapticFeedback.mediumImpact();
     final dx = d.localPosition.dx - s.width / 2;
     final dy = d.localPosition.dy - s.height / 2;
     final dist = math.sqrt(dx * dx + dy * dy);
-    if (dist < 52) {
+    if (dist < s.width * 0.19) {
       widget.onCenter();
       return;
     }
@@ -707,19 +707,19 @@ class _ClickWheelState extends State<ClickWheel> {
 
   @override
   Widget build(BuildContext context) {
-    const size = 272.0;
+    final size = widget.size;
     return SizedBox(
       width: size,
       height: size,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onPanStart: (d) {
-          _lastAngle = _angleOf(d.localPosition, const Size(size, size));
+          _lastAngle = _angleOf(d.localPosition, Size(size, size));
           _accumulated = 0;
         },
-        onPanUpdate: (d) => _handlePan(d, const Size(size, size)),
+        onPanUpdate: (d) => _handlePan(d, Size(size, size)),
         onPanEnd: (_) => _lastAngle = null,
-        onTapUp: (d) => _handleTap(d, const Size(size, size)),
+        onTapUp: (d) => _handleTap(d, Size(size, size)),
         child: Container(
           decoration: const BoxDecoration(
             shape: BoxShape.circle,
@@ -735,32 +735,32 @@ class _ClickWheelState extends State<ClickWheel> {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              const Positioned(
-                top: 16,
+              Positioned(
+                top: size * 0.059,
                 child: Text('MENU',
                     style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF55555A),
-                        fontSize: 15)),
-              ),
-              const Positioned(
-                left: 14,
-                child: Icon(Icons.skip_previous, color: Color(0xFF55555A)),
-              ),
-              const Positioned(
-                right: 14,
-                child: Icon(Icons.skip_next, color: Color(0xFF55555A)),
+                        color: const Color(0xFF55555A),
+                        fontSize: size * 0.055)),
               ),
               Positioned(
-                bottom: 14,
+                left: size * 0.051,
+                child: const Icon(Icons.skip_previous, color: Color(0xFF55555A)),
+              ),
+              Positioned(
+                right: size * 0.051,
+                child: const Icon(Icons.skip_next, color: Color(0xFF55555A)),
+              ),
+              Positioned(
+                bottom: size * 0.051,
                 child: Icon(
                   widget.isPlaying ? Icons.pause : Icons.play_arrow,
                   color: const Color(0xFF55555A),
                 ),
               ),
               Container(
-                width: 104,
-                height: 104,
+                width: size * 0.382,
+                height: size * 0.382,
                 decoration: const BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: LinearGradient(
