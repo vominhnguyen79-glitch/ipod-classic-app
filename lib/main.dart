@@ -1,10 +1,12 @@
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_media_metadata/flutter_media_metadata.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:video_player/video_player.dart';
@@ -84,6 +86,63 @@ class _IPodHomePageState extends State<IPodHomePage> {
   int _currentPhoto = 0;
   bool _videoReady = false;
 
+  // ---------------- Anh bia nhung trong file nhac ----------------
+  // Chi DOC anh co san trong file (ID3/APIC, iTunes covr, Vorbis
+  // PICTURE...), KHONG sua file nhac, KHONG gan them anh cho file.
+  // Anh doc duoc se cache trong RAM + ghi ra file tam rieng de lam
+  // anh bia man hinh khoa/thong bao (qua MediaItem.artUri).
+  // File khong co anh -> tra null, giao dien giu nguyen ban chu.
+  final Map<String, Uint8List> _artBytesCache = {};
+  final Map<String, Uri> _artUriCache = {};
+
+  Future<Uint8List?> _artworkBytesFor(String path) async {
+    if (_artBytesCache.containsKey(path)) return _artBytesCache[path];
+    try {
+      final metadata = await MetadataRetriever.fromFile(File(path));
+      final bytes = metadata.albumArt;
+      if (bytes != null && bytes.isNotEmpty) {
+        _artBytesCache[path] = bytes;
+        return bytes;
+      }
+    } catch (_) {
+      // File khong co anh / dinh dang khong doc duoc -> khong co anh bia.
+    }
+    return null;
+  }
+
+  int _stableHash(String s) {
+    var h = 5381;
+    for (final c in s.codeUnits) {
+      h = ((h << 5) + h + c) & 0x7fffffff;
+    }
+    return h;
+  }
+
+  Future<Uri?> _artUriFor(String path, Uint8List bytes) async {
+    if (_artUriCache.containsKey(path)) return _artUriCache[path];
+    try {
+      // Doan dinh dang anh theo magic bytes de dat dung duoi file.
+      var ext = 'jpg';
+      if (bytes.length >= 4 &&
+          bytes[0] == 0x89 &&
+          bytes[1] == 0x50 &&
+          bytes[2] == 0x4E &&
+          bytes[3] == 0x47) {
+        ext = 'png';
+      }
+      final file = File(
+          '${Directory.systemTemp.path}/ipod_art_${_stableHash(path)}.$ext');
+      if (!await file.exists()) {
+        await file.writeAsBytes(bytes, flush: true);
+      }
+      final uri = Uri.file(file.path);
+      _artUriCache[path] = uri;
+      return uri;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static const List<String> _menuItems = [
     'Music',
     'Videos',
@@ -148,6 +207,18 @@ class _IPodHomePageState extends State<IPodHomePage> {
   Future<void> _playAudioAt(int index) async {
     if (_audios.isEmpty) return;
     await _video?.pause();
+    // Doc anh bia nhung san trong tung file truoc khi phat.
+    // Bai nao co anh: anh hien ca tren man hinh Now Playing lan
+    // tren man hinh khoa/thong bao (qua artUri, giong Spotify).
+    // Bai khong co anh: artUri = null, he thong hien mac dinh.
+    // Doc lan dau hoi cham mot chut (doc header file), cac lan
+    // sau lay tu cache nen khong doc lai.
+    final Map<String, Uri?> artUris = {};
+    for (final track in _audios) {
+      final bytes = await _artworkBytesFor(track.path);
+      artUris[track.path] =
+          bytes == null ? null : await _artUriFor(track.path, bytes);
+    }
     final sources = _audios
         .map((e) => AudioSource.file(
               e.path,
@@ -156,6 +227,7 @@ class _IPodHomePageState extends State<IPodHomePage> {
                 title: e.name,
                 album: 'iPod Classic',
                 artist: 'My Library',
+                artUri: artUris[e.path],
               ),
             ))
         .toList();
@@ -355,7 +427,17 @@ class _IPodHomePageState extends State<IPodHomePage> {
           ),
           child: Column(
             children: [
-              Expanded(child: _buildScreen()),
+              // Man hinh LCD ti le chuan iPod Classic 7: 320x240 = 4:3.
+              // Tren dien thoai cao, phan than may con thua se om quanh
+              // man hinh (man hinh nam giua vung Expanded).
+              Expanded(
+                child: Center(
+                  child: AspectRatio(
+                    aspectRatio: 4 / 3,
+                    child: _buildScreen(),
+                  ),
+                ),
+              ),
               const SizedBox(height: 22),
               ClickWheel(
                 size: wheelSize,
@@ -528,21 +610,64 @@ class _IPodHomePageState extends State<IPodHomePage> {
       );
     }
     final track = _audios[_currentAudio];
+    // Anh bia chi hien khi file nhac co san anh nhung (da doc o
+    // _playAudioAt); file khong co anh thi giu nguyen giao dien chu.
+    final art = _artBytesCache[track.path];
     return Padding(
       padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Anh bia co dan theo chieu cao LCD: man hinh hep hoac
+          // chu he thong to hon van vua, khong con loi RenderFlex
+          // overflow nhu ban truoc (tran 9.8px o day man hinh).
+          final artSize =
+              (constraints.maxHeight - 140).clamp(56.0, 84.0).toDouble();
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
           const Text('Now Playing',
               style: TextStyle(fontSize: 12, color: Colors.black54)),
           const SizedBox(height: 8),
-          Text(track.name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style:
-                  const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-          const Text('My Library - iPod Classic',
-              style: TextStyle(fontSize: 13, color: Colors.black54)),
+          if (art != null)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: Image.memory(art,
+                      width: artSize, height: artSize, fit: BoxFit.cover),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(track.name,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 17, fontWeight: FontWeight.bold)),
+                      const Text('My Library - iPod Classic',
+                          style: TextStyle(
+                              fontSize: 13, color: Colors.black54)),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(track.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 17, fontWeight: FontWeight.bold)),
+                const Text('My Library - iPod Classic',
+                    style: TextStyle(fontSize: 13, color: Colors.black54)),
+              ],
+            ),
           const Spacer(),
           StreamBuilder<Duration>(
             stream: _player.positionStream,
@@ -575,7 +700,9 @@ class _IPodHomePageState extends State<IPodHomePage> {
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 11, color: Colors.black54),
           ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }

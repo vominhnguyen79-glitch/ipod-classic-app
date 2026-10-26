@@ -16,6 +16,8 @@ dependencies:
   audio_service: ^0.18.15
   # Chon file nhac / video / anh tu may
   file_picker: ^13.1.0
+  # Doc metadata + anh bia nhung san trong file nhac (chi doc, khong sua file)
+  flutter_media_metadata: ^1.0.0
   # Phat video
   video_player: ^2.9.2
 
